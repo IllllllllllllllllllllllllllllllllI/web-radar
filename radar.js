@@ -30,30 +30,49 @@ function connect() {
 
     if (eventSource) eventSource.close();
 
+    connectBtn.disabled = true;
+    connectBtn.textContent = "VERIFYING...";
+
+    let firstPacketReceived = false;
+    const connectionTimeout = setTimeout(() => {
+        if (!firstPacketReceived) {
+            if (eventSource) eventSource.close();
+            connectBtn.disabled = false;
+            connectBtn.textContent = "CONNECT";
+            alert("No active stream found for this code. Make sure Web Radar is enabled in-game.");
+        }
+    }, 10000); // 10s timeout
+
     eventSource = new EventSource(url);
     eventSource.onmessage = (e) => {
         try {
             const data = JSON.parse(e.data);
             if (data.players || data.local) {
+                if (!firstPacketReceived) {
+                    firstPacketReceived = true;
+                    clearTimeout(connectionTimeout);
+                    loginScreen.classList.add('hidden');
+                    radarContainer.classList.remove('hidden');
+                    displayCode.textContent = code;
+                    connectBtn.disabled = false;
+                    connectBtn.textContent = "CONNECT";
+                    requestAnimationFrame(render);
+                }
                 radarData = data;
+                lastPacketTime = Date.now();
             }
         } catch (err) {
-            console.error("JSON Parse Error", err);
+            // ntfy.sh sometimes sends heatbeat/control messages that aren't our JSON
         }
     };
 
     eventSource.onerror = () => {
-        console.error("Connection lost. Retrying...");
+        console.error("Connection error.");
     };
-
-    loginScreen.classList.add('hidden');
-    radarContainer.classList.remove('hidden');
-    displayCode.textContent = code;
-    
-    requestAnimationFrame(render);
 }
 
 // Auto-connect if code is in URL
+let lastPacketTime = Date.now();
 const urlParams = new URLSearchParams(window.location.search);
 const urlCode = urlParams.get('code');
 if (urlCode) {
@@ -140,15 +159,25 @@ function render() {
     ctx.fillStyle = '#f3a1fa';
     ctx.save();
     ctx.translate(cx, cy);
-    // Local player is always at center, facing "up" in its own relative space after rotation
-    // But we rotated the world around it, so it's always facing north on the flat radar?
-    // Actually, in worldToRadar we rotated by -localRot, so local is always facing North (Up).
     ctx.beginPath();
     ctx.moveTo(0, -8);
     ctx.lineTo(-6, 6);
     ctx.lineTo(6, 6);
     ctx.fill();
     ctx.restore();
+
+    // Check Heartbeat
+    if (Date.now() - lastPacketTime > 5000) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ff4444';
+        ctx.font = 'bold 14px Orbitron';
+        ctx.textAlign = 'center';
+        ctx.fillText("CONNECTION LOST / STREAM PAUSED", cx, cy);
+        ctx.font = '11px Inter';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText("Waiting for data from cheat...", cx, cy + 25);
+    }
 
     requestAnimationFrame(render);
 }
