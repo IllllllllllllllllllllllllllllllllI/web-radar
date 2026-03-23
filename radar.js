@@ -28,7 +28,10 @@ function connect() {
     const topic = `nemesis_radar_${code}`;
     const url = `https://ntfy.sh/${topic}/sse`;
 
-    if (eventSource) eventSource.close();
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
 
     connectBtn.disabled = true;
     connectBtn.textContent = "VERIFYING...";
@@ -36,14 +39,23 @@ function connect() {
     let firstPacketReceived = false;
     const connectionTimeout = setTimeout(() => {
         if (!firstPacketReceived) {
-            if (eventSource) eventSource.close();
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
             connectBtn.disabled = false;
             connectBtn.textContent = "CONNECT";
-            alert("No active stream found for this code. Make sure Web Radar is enabled in-game.");
+            alert("This session code is either invalid or the cheat is not currently broadcasting. Please check the 'Radar' settings in your cheat menu.");
+            
+            // Clear URL param if it was an auto-connect failure
+            if (window.location.search.includes('code=')) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
         }
-    }, 10000); // 10s timeout
+    }, 5000); // 5s timeout is sufficient for verification
 
     eventSource = new EventSource(url);
+    
     eventSource.onmessage = (e) => {
         try {
             const ntfyData = JSON.parse(e.data);
@@ -67,12 +79,18 @@ function connect() {
                 lastPacketTime = Date.now();
             }
         } catch (err) {
-            // ntfy.sh sometimes sends heatbeat/control messages that aren't our JSON
+            console.error("Parse error:", err);
         }
     };
 
-    eventSource.onerror = () => {
-        console.error("Connection error.");
+    eventSource.onopen = () => {
+        console.log("SSE Connection opened, waiting for first packet...");
+    };
+
+    eventSource.onerror = (e) => {
+        console.error("SSE error:", e);
+        // Don't alert here as EventSource often recovers, 
+        // rely on the 5s timeout for initial verification.
     };
 }
 
