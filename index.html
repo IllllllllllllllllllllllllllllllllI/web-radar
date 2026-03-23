@@ -8,65 +8,119 @@
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
-    <!-- Login -->
+    <!-- Login Screen -->
     <div id="login-screen" class="overlay">
         <div class="login-card">
             <h1>NEMESIS <span class="accent">RADAR</span></h1>
             <p>Access remote telemetry stream</p>
             <div class="input-group">
-                <input type="text" id="session-code" placeholder="Enter Session Code" autocomplete="off" spellcheck="false">
+                <div class="input-wrapper">
+                    <input type="text" id="session-code" placeholder="ENTER PLAYER CODE" autocomplete="off" spellcheck="false">
+                </div>
                 <button id="connect-btn">CONNECT</button>
             </div>
             <div id="error-msg" class="error-msg" style="display:none;"></div>
         </div>
     </div>
 
-    <!-- Radar -->
+    <!-- Radar UI -->
     <div id="radar-container" class="hidden">
         <div class="header">
             <div class="status-indicator">
-                <span class="dot pulse"></span> LIVE STREAMING
+                <span class="dot pulse"></span> <span class="status-text">LIVE TELEMETRY</span>
             </div>
             <div class="session-info">
                 SESSION: <span id="display-code" class="accent">--------</span>
             </div>
             <div class="header-right">
-                <button id="options-btn" class="opts-btn">⚙ OPTIONS</button>
+                <button id="options-btn" class="opts-btn">⚙ CONFIG</button>
             </div>
         </div>
 
         <div class="radar-wrapper">
             <canvas id="radar-canvas"></canvas>
 
-            <!-- Options Panel -->
+            <!-- Config Panel (ImGui Style) -->
             <div id="options-panel" class="options-panel" style="display:none;">
-                <div class="opt-section-title">DISPLAY</div>
-                <label class="opt-row"><input type="checkbox" id="opt-names"    checked> Names</label>
-                <label class="opt-row"><input type="checkbox" id="opt-health"   checked> Health Bars</label>
-                <label class="opt-row"><input type="checkbox" id="opt-distance" checked> Distance</label>
-                <label class="opt-row"><input type="checkbox" id="opt-team"     checked> Show Teammates</label>
-                <label class="opt-row"><input type="checkbox" id="opt-dead"> Show Dead</label>
+                <div class="panel-header">RADAR CONFIGURATION</div>
+                
+                <div class="opt-group">
+                    <div class="opt-section-title">VISUALS</div>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-names">
+                        <span class="checkmark"></span>
+                        Show Names
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-health">
+                        <span class="checkmark"></span>
+                        Health Bars
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-distance">
+                        <span class="checkmark"></span>
+                        Distance Info
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-team">
+                        <span class="checkmark"></span>
+                        Teammates
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-dead">
+                        <span class="checkmark"></span>
+                        Dead Players
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-map">
+                        <span class="checkmark"></span>
+                        Map Geometry
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-follow">
+                        <span class="checkmark"></span>
+                        Follow Player
+                    </label>
+                    <label class="custom-checkbox">
+                        <input type="checkbox" id="opt-rotate-cam">
+                        <span class="checkmark"></span>
+                        Rotate Camera
+                    </label>
+                </div>
 
-                <div class="opt-section-title" style="margin-top:12px;">DOT SIZE</div>
-                <div class="opt-row">
-                    <input type="range" id="opt-dotsize" min="3" max="12" value="5" class="opt-slider">
-                    <span id="opt-dotsize-val">5</span>
+                <div class="opt-group">
+                    <div class="opt-section-title">WIDGETS</div>
+                    
+                    <div class="widget-row">
+                        <span class="widget-label">SHAPE</span>
+                        <div class="custom-select-wrapper">
+                            <select id="opt-shape" class="custom-select">
+                                <option value="circle">CIRCLE</option>
+                                <option value="square">SQUARE</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="widget-row slider-col">
+                        <div class="slider-header">
+                            <span class="widget-label">ENTITY SIZE</span>
+                            <span id="opt-dotsize-val" class="slider-value">4.5</span>
+                        </div>
+                        <input type="range" id="opt-dotsize" min="2" max="10" value="4.5" step="0.5" class="custom-slider">
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="controls">
-            <div class="zoom-display">ZOOM: <span id="zoom-val">1.0</span>x &nbsp;|&nbsp; Scroll to zoom</div>
+        <div class="footer">
+            <div class="zoom-info">
+                ZOOM: <span id="zoom-val">1.0</span>x <span class="hint">| SCROLL TO ZOOM</span>
+            </div>
+            <div class="version">NEMESIS REMOTE V2.1</div>
         </div>
     </div>
 
     <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.4.3.min.js"></script>
     <script src="radar.js"></script>
-    <script>
-        // Dot size slider live update
-        const ds = document.getElementById('opt-dotsize');
-        const dsVal = document.getElementById('opt-dotsize-val');
-        if (ds && dsVal) ds.oninput = () => { dsVal.textContent = ds.value; };
-    </script>
 </body>
 </html>

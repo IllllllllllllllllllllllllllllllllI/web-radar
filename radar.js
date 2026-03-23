@@ -1,51 +1,65 @@
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const loginScreen   = document.getElementById('login-screen');
-const radarContainer= document.getElementById('radar-container');
-const sessionInput  = document.getElementById('session-code');
-const connectBtn    = document.getElementById('connect-btn');
-const displayCode   = document.getElementById('display-code');
-const canvas        = document.getElementById('radar-canvas');
-const ctx           = canvas.getContext('2d');
-const zoomValDisplay= document.getElementById('zoom-val');
-const errorMsg      = document.getElementById('error-msg');
-const optionsBtn    = document.getElementById('options-btn');
-const optionsPanel  = document.getElementById('options-panel');
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const loginScreen    = document.getElementById('login-screen');
+const radarContainer = document.getElementById('radar-container');
+const sessionInput   = document.getElementById('session-code');
+const connectBtn     = document.getElementById('connect-btn');
+const displayCode    = document.getElementById('display-code');
+const canvas         = document.getElementById('radar-canvas');
+const ctx            = canvas.getContext('2d');
+const zoomValDisplay = document.getElementById('zoom-val');
+const errorMsg       = document.getElementById('error-msg');
+const optionsBtn     = document.getElementById('options-btn');
+const optionsPanel   = document.getElementById('options-panel');
 
-// ── State ──────────────────────────────────────────────────────────────────────
+// ── State ────────────────────────────────────────────────────────────────────
 let pubnub = null;
-let radarData = { players: [], local: { pos:[0,0,0], rot:0, range:500, name:'You' } };
-let zoom = 1.0;
-let lastPacketTime = 0;
+let zoom   = 1.0;
+let lastPacketTime   = 0;
 let firstPacketReceived = false;
 
-// ── Options ────────────────────────────────────────────────────────────────────
+// Latest snapshot from cheat (raw)
+let snapshot = { players: [], local: { pos:[0,0,0], rot:[1,0,0,1], name:'', range:500 } };
+
+// Map parts (cached, updated infrequently)
+let mapParts = [];    // [{cx, cz, sx, sz, r00, r02, r20, r22}, ...]
+
+// Smooth interpolation: per-player state keyed by name
+const playerStates = {};  // name -> {x, z, fx, fz, health, maxHealth, isEnemy}
+
+// Smooth local player interpolation
+const localState = { x: 0, z: 0, rot: [1, 0, 0, 1], range: 500 };
+
+// Options
 const opts = {
-    showNames:    true,
-    showHealth:   true,
-    showDistance: true,
-    showTeam:     true,
+    showNames:    false,
+    showHealth:   false,
+    showDistance: false,
+    showTeam:     false,
     showDead:     false,
-    dotSize:      5,
+    showMap:      false,
+    followPlayer: false,
+    rotateCamera: false,
+    shape:       'circle',  // 'circle' | 'square'
+    dotSize:      4.5,
 };
 
-function getOpt(id) {
-    const el = document.getElementById(id);
-    return el ? (el.type === 'checkbox' ? el.checked : parseFloat(el.value)) : opts[id];
-}
-
-// Sync opts from DOM
 function syncOpts() {
     opts.showNames    = document.getElementById('opt-names').checked;
     opts.showHealth   = document.getElementById('opt-health').checked;
     opts.showDistance = document.getElementById('opt-distance').checked;
     opts.showTeam     = document.getElementById('opt-team').checked;
     opts.showDead     = document.getElementById('opt-dead').checked;
-    opts.dotSize      = parseFloat(document.getElementById('opt-dotsize').value);
+    opts.showMap      = document.getElementById('opt-map').checked;
+    opts.followPlayer = document.getElementById('opt-follow').checked;
+    opts.rotateCamera = document.getElementById('opt-rotate-cam').checked;
+    opts.shape        = document.getElementById('opt-shape').value;
+    opts.dotSize      = parseFloat(document.getElementById('opt-dotsize').value) || 4.5;
+    document.getElementById('opt-dotsize-val').textContent = opts.dotSize.toFixed(1);
 }
+document.querySelectorAll('#options-panel input, #options-panel select').forEach(el =>
+    el.addEventListener('change', syncOpts));
 
-document.querySelectorAll('#options-panel input').forEach(el => el.addEventListener('change', syncOpts));
-
-// ── Canvas resize ──────────────────────────────────────────────────────────────
+// ── Canvas ────────────────────────────────────────────────────────────────────
 function resize() {
     canvas.width  = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
@@ -53,7 +67,7 @@ function resize() {
 window.onresize = resize;
 resize();
 
-// ── Error display ──────────────────────────────────────────────────────────────
+// ── Error ────────────────────────────────────────────────────────────────────
 function showError(msg) {
     if (errorMsg) { errorMsg.textContent = msg; errorMsg.style.display = 'block'; }
 }
@@ -61,11 +75,10 @@ function clearError() {
     if (errorMsg) errorMsg.style.display = 'none';
 }
 
-// ── Connect ────────────────────────────────────────────────────────────────────
+// ── Connect ──────────────────────────────────────────────────────────────────
 function connect() {
     const code = sessionInput.value.trim();
     if (!code) { showError('Please enter a session code.'); return; }
-
     clearError();
     connectBtn.disabled = true;
     connectBtn.textContent = 'VERIFYING...';
@@ -74,7 +87,7 @@ function connect() {
     if (pubnub) { pubnub.unsubscribeAll(); pubnub = null; }
 
     const channel = `nemesis_${code}`;
-
+    const mapChannel = `nemesis_map_${code}`;
     const timeout = setTimeout(() => {
         if (!firstPacketReceived) {
             if (pubnub) { pubnub.unsubscribeAll(); pubnub = null; }
@@ -86,217 +99,365 @@ function connect() {
         }
     }, 8000);
 
-    pubnub = new PubNub({
-        publishKey:   'demo',
-        subscribeKey: 'demo',
-        uuid: 'viewer-' + Math.random().toString(36).substr(2,6)
-    });
+    pubnub = new PubNub({ publishKey: 'demo', subscribeKey: 'demo',
+        uuid: 'viewer-' + Math.random().toString(36).substr(2,6) });
 
-    pubnub.addListener({
-        message: (ev) => {
-            try {
-                const data = ev.message;
-                if (!data || (data.players === undefined && data.local === undefined)) return;
+    pubnub.addListener({ message: (ev) => {
+        try {
+            const data = ev.message;
+            if (!data) return;
+
+            // Handle player/local data channel
+            if (data.players !== undefined || data.local !== undefined) {
                 if (!firstPacketReceived) {
                     firstPacketReceived = true;
                     clearTimeout(timeout);
                     clearError();
                     loginScreen.classList.add('hidden');
                     radarContainer.classList.remove('hidden');
+                    resize();   // CRITICAL: canvas was 0x0 while hidden
                     displayCode.textContent = code;
                     connectBtn.disabled = false;
                     connectBtn.textContent = 'CONNECT';
                     requestAnimationFrame(render);
                 }
-                radarData = data;
-                lastPacketTime = Date.now();
-            } catch(e) {}
-        }
-    });
 
-    pubnub.subscribe({ channels: [channel] });
+                snapshot = data;
+                lastPacketTime = Date.now();
+
+                // Update local interpolation targets
+                if (data.local) {
+                    localState.targetX = data.local.pos[0];
+                    localState.targetZ = data.local.pos[2];
+                    localState.targetRot = data.local.rot;
+                    localState.range = data.local.range || 500;
+                    localState.name = data.local.name;
+                    
+                    // Initial snap
+                    if (localState.x === 0 && localState.z === 0) {
+                        localState.x = localState.targetX;
+                        localState.z = localState.targetZ;
+                        localState.rot = localState.targetRot;
+                    }
+                }
+
+                // Update interpolation targets
+                const players = data.players || [];
+                for (const p of players) {
+                    if (!p.name) continue;
+                    if (!playerStates[p.name]) {
+                        playerStates[p.name] = { x: p.pos[0], z: p.pos[2], fx: p.facing?.[0]||0, fz: p.facing?.[1]||-1,
+                            health: p.health, maxHealth: p.maxHealth, isEnemy: p.isEnemy, dead: false };
+                    } else {
+                        const st = playerStates[p.name];
+                        st.targetX = p.pos[0]; st.targetZ = p.pos[2];
+                        st.targetFx = p.facing?.[0]||st.fx; st.targetFz = p.facing?.[1]||st.fz;
+                        st.health = p.health; st.maxHealth = p.maxHealth;
+                        st.isEnemy = p.isEnemy; st.name = p.name;
+                        st.dead = (p.health !== undefined && p.health <= 0);
+                    }
+                }
+                // Remove players who left
+                const names = new Set(players.map(p => p.name));
+                for (const k of Object.keys(playerStates)) if (!names.has(k)) delete playerStates[k];
+            }
+
+            // Handle map data channel (now separate and chunked)
+            if (data.map) {
+                if (data.chunk === 0) mapParts = []; // Start of new map Snapshot
+                mapParts = mapParts.concat(data.map);
+                if (data.chunk === data.total - 1) {
+                    console.log(`Map complete: ${mapParts.length} parts`);
+                }
+            }
+        } catch(e) { console.error(e); }
+    }});
+    pubnub.subscribe({ channels: [channel, mapChannel] });
 }
 
 // Auto-connect from URL
 const urlParams = new URLSearchParams(window.location.search);
 const urlCode   = urlParams.get('code');
-if (urlCode) {
-    sessionInput.value = urlCode;
-    window.addEventListener('load', () => setTimeout(connect, 200));
-}
+if (urlCode) { sessionInput.value = urlCode; window.addEventListener('load', () => setTimeout(connect, 200)); }
 
 connectBtn.onclick = connect;
 sessionInput.onkeydown = (e) => { if (e.key === 'Enter') connect(); };
 
-// ── Options toggle ─────────────────────────────────────────────────────────────
+// Options panel toggle
 if (optionsBtn && optionsPanel) {
     optionsBtn.onclick = () => {
-        const visible = optionsPanel.style.display !== 'none';
-        optionsPanel.style.display = visible ? 'none' : 'block';
+        optionsPanel.style.display = (optionsPanel.style.display === 'none') ? 'block' : 'none';
     };
 }
 
-// ── Coordinate transform ───────────────────────────────────────────────────────
-function worldToScreen(wx, wz, lx, lz, rot, range) {
-    const relX =  wx - lx;
-    const relZ =  wz - lz;
-
-    // Rotate by camera yaw so "forward" is always up on screen
-    const cos = Math.cos(-rot);
-    const sin = Math.sin(-rot);
-    const rx = relX * cos - relZ * sin;
-    const rz = relX * sin + relZ * cos;
-
-    const halfW = canvas.width  / 2;
-    const halfH = canvas.height / 2;
-    const scale = (Math.min(halfW, halfH) / range) * zoom;
-
-    return { x: halfW + rx * scale, y: halfH + rz * scale };
+// ── WorldToRadar: mirrors radar.h WorldToRadar exactly ─────────────────────
+// rot = [r00, r02, r20, r22]
+function worldToRadar(dx, dz, rot) {
+    const r00 = rot[0], r02 = rot[1], r20 = rot[2], r22 = rot[3];
+    // Forward vector: (-r02, -r22)
+    let fX = -r02, fZ = -r22;
+    const fLen = Math.sqrt(fX*fX + fZ*fZ);
+    if (fLen < 0.001) return { rx: dx, rz: dz };
+    fX /= fLen; fZ /= fLen;
+    // Right vector: (r00, r20)
+    let rX = r00, rZ = r20;
+    const rLen = Math.sqrt(rX*rX + rZ*rZ);
+    if (rLen > 0.001) { rX /= rLen; rZ /= rLen; }
+    else { rX = -fZ; rZ = fX; }
+    return {
+        rx:  dx * rX + dz * rZ,
+        rz: -(dx * fX + dz * fZ)
+    };
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────────
+// ── Render ───────────────────────────────────────────────────────────────────
+let lastFrameTime = performance.now();
+
 function render() {
     if (radarContainer.classList.contains('hidden')) return;
+    if (canvas.width === 0 || canvas.height === 0) { resize(); requestAnimationFrame(render); return; }
 
-    const W = canvas.width, H = canvas.height;
-    const cx = W / 2, cy = H / 2;
+    // Interpolation delta
+    const now = performance.now();
+    const dt  = Math.min((now - lastFrameTime) / 1000, 0.1);
+    lastFrameTime = now;
+    const lerpSpeed = 12.0;
+    const lerpK = Math.min(1.0, lerpSpeed * dt);
 
+    // Interpolate local player
+    if (localState.targetX !== undefined) {
+        localState.x += (localState.targetX - localState.x) * lerpK;
+        localState.z += (localState.targetZ - localState.z) * lerpK;
+        if (localState.targetRot) {
+            for (let i = 0; i < 4; i++) {
+                localState.rot[i] += (localState.targetRot[i] - localState.rot[i]) * lerpK;
+            }
+        }
+    }
+
+    const W  = canvas.width, H = canvas.height;
+    const cx = W / 2,        cy = H / 2;
+    const range  = localState.range;
+    
+    // Determine center and rotation based on options
+    const rot = opts.rotateCamera ? localState.rot : [1, 0, 0, 1]; // [rot.r00, rot.r02, rot.r20, rot.r22]
+    const lx  = opts.followPlayer ? localState.x   : 0;
+    const lz  = opts.followPlayer ? localState.z   : 0;
+
+    const isCirc = opts.shape === 'circle';
+    const radius = Math.min(W, H) * 0.5 - 2;
+    const scale  = (radius / range) * zoom;
+
+    // ── Background ──
     ctx.clearRect(0, 0, W, H);
+    ctx.save();
 
-    // Background
-    ctx.fillStyle = '#0a0a0c';
-    ctx.fillRect(0, 0, W, H);
-
-    // Grid
-    ctx.strokeStyle = '#1a1a20'; ctx.lineWidth = 1;
-    const gridSpacing = 50 * zoom;
-    const gridOffX = cx % gridSpacing, gridOffY = cy % gridSpacing;
-    for (let x = gridOffX; x < W; x += gridSpacing) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-    }
-    for (let y = gridOffY; y < H; y += gridSpacing) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    if (isCirc) {
+        ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.clip();
+    } else {
+        ctx.beginPath(); ctx.rect(cx - radius, cy - radius, radius * 2, radius * 2); ctx.clip();
     }
 
-    // Crosshair
-    ctx.strokeStyle = '#2a2a36'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+    ctx.fillStyle = 'rgba(5,5,5,0.95)';
+    if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill(); }
+    else { ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2); }
 
-    const local   = radarData.local   || { pos:[0,0,0], rot:0, range:500, name:'You' };
-    const players = radarData.players || [];
-    const range   = local.range || 500;
+    // ── Grid (5 lines each way like in-game) ──
+    ctx.strokeStyle = 'rgba(70,70,80,0.5)';
+    ctx.lineWidth = 1;
+    if (isCirc) {
+        for (let i = 0; i <= 4; i++) {
+            const off = (radius * 2 / 4) * i - radius;
+            // Vertical
+            const ab = Math.sqrt(Math.max(0, radius*radius - off*off));
+            ctx.beginPath(); ctx.moveTo(cx + off, cy - ab); ctx.lineTo(cx + off, cy + ab); ctx.stroke();
+            // Horizontal
+            ctx.beginPath(); ctx.moveTo(cx - ab, cy + off); ctx.lineTo(cx + ab, cy + off); ctx.stroke();
+        }
+        ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI*2); ctx.stroke();
+    } else {
+        for (let i = 0; i <= 4; i++) {
+            const off = (radius * 2 / 4) * i - radius;
+            ctx.beginPath(); ctx.moveTo(cx + off, cy - radius); ctx.lineTo(cx + off, cy + radius); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - radius, cy + off); ctx.lineTo(cx + radius, cy + off); ctx.stroke();
+        }
+    }
 
-    // Range ring
-    const halfMin = Math.min(cx, cy);
-    const ringR   = halfMin * zoom;
-    ctx.strokeStyle = '#25252b'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx, cy, ringR*0.5, 0, Math.PI*2); ctx.stroke();
+    // ── Map Parts ──
+    if (opts.showMap && mapParts.length > 0) {
+        ctx.fillStyle   = 'rgba(40,40,45,0.7)';
+        ctx.strokeStyle = 'rgba(70,70,80,0.5)';
+        ctx.lineWidth   = 0.8;
+
+        for (const part of mapParts) {
+            // part = [cx, cz, sx, sz, r00, r02, r20, r22]
+            const [pcx, pcz, psx, psz, pr00, pr02, pr20, pr22] = part;
+            const hx = psx * 0.5, hz = psz * 0.5;
+
+            // 4 corners in part-local space, transformed by part rotation then camera rotation
+            const corners = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
+            const pts = [];
+            for (const [lx_, lz_] of corners) {
+                // Apply part rotation (XZ plane)
+                const wx = pcx + lx_ * pr00 + lz_ * pr02;
+                const wz = pcz + lx_ * pr20 + lz_ * pr22;
+                // Offset from local player
+                const dx = wx - lx, dz = wz - lz;
+                // Apply camera rotation
+                const {rx, rz} = worldToRadar(dx, dz, rot);
+                pts.push([cx + rx * scale, cy + rz * scale]);
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+    }
+
+    // ── Crosshair ──
+    ctx.strokeStyle = 'rgba(70,70,80,0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
 
     // ── Players ──
-    players.forEach(p => {
-        if (!p.pos) return;
-        if (!opts.showDead && p.health !== undefined && p.health <= 0) return;
+    for (const [name, st] of Object.entries(playerStates)) {
+        // Interpolate position
+        if (st.targetX !== undefined) {
+            st.x  += (st.targetX - st.x)  * lerpK;
+            st.z  += (st.targetZ - st.z)  * lerpK;
+            st.fx += (st.targetFx - st.fx) * lerpK;
+            st.fz += (st.targetFz - st.fz) * lerpK;
+        }
 
-        const rPos = worldToScreen(p.pos[0], p.pos[2], local.pos[0], local.pos[2], local.rot || 0, range);
+        if (!opts.showDead && st.dead) continue;
+        if (!opts.showTeam && !st.isEnemy) continue;
 
-        // Skip if way off-screen
-        if (rPos.x < -50 || rPos.x > W+50 || rPos.y < -50 || rPos.y > H+50) return;
+        const dx = st.x - lx, dz = st.z - lz;
+        const {rx, rz} = worldToRadar(dx, dz, rot);
+        let relX = rx / range, relY = rz / range;
 
-        const isEnemy= p.isEnemy;
-        const isTeam = !isEnemy;
-        const dotClr = isEnemy ? '#ff4444' : '#44ff88';
+        // Clamp to edge like in-game
+        if (isCirc) {
+            const d = Math.sqrt(relX*relX + relY*relY);
+            if (d > 0.96) { relX = (relX/d)*0.98; relY = (relY/d)*0.98; }
+        } else {
+            relX = Math.max(-0.98, Math.min(0.98, relX));
+            relY = Math.max(-0.98, Math.min(0.98, relY));
+        }
 
-        // Dot glow
-        ctx.shadowBlur  = 8;
-        ctx.shadowColor = dotClr;
-        ctx.fillStyle   = dotClr;
-        ctx.beginPath();
-        ctx.arc(rPos.x, rPos.y, opts.dotSize, 0, Math.PI*2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        const px = cx + rx * scale;
+        const py = cy + rz * scale;
 
-        const txtY = rPos.y - opts.dotSize - 3;
-        let labelOffset = 0;
+        // Rotate player facing through camera
+        const {rx: rfx, rz: rfz} = worldToRadar(st.fx, st.fz, rot);
+        const fLen = Math.sqrt(rfx*rfx + rfz*rfz);
+        const dotColor = st.isEnemy ? 'rgba(255,60,60,1)' : 'rgba(173,216,230,1)';
+        const outColor = 'rgba(0,0,0,0.8)';
 
-        // Name
-        if (opts.showNames) {
+        if (fLen > 0.001) {
+            const nfx = rfx/fLen, nfz = rfz/fLen;
+            const s = opts.dotSize;
+            const p1 = [px + nfx*s*1.5,       py + nfz*s*1.5];
+            const p2 = [px + (-nfx - nfz)*s,  py + (-nfz + nfx)*s];
+            const p3 = [px + (-nfx + nfz)*s,  py + (-nfz - nfx)*s];
+
+            ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.lineTo(p3[0],p3[1]); ctx.closePath();
+            ctx.fillStyle = dotColor; ctx.fill();
+            ctx.strokeStyle = outColor; ctx.lineWidth = 1; ctx.stroke();
+        } else {
+            ctx.beginPath(); ctx.arc(px, py, opts.dotSize, 0, Math.PI*2);
+            ctx.fillStyle = dotColor; ctx.fill();
+            ctx.strokeStyle = outColor; ctx.lineWidth = 1; ctx.stroke();
+        }
+
+        // Labels (name [hp] dist)
+        let label = '';
+        if (opts.showNames)    label += name;
+        if (opts.showHealth && st.maxHealth) label += (label?' ':'') + '[' + Math.round(st.health) + ']';
+        if (opts.showDistance) {
+            const dm = Math.round(Math.sqrt(dx*dx + dz*dz));
+            label += (label?' ':'') + dm + 'm';
+        }
+        if (label) {
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            const lY = py - opts.dotSize - 4;
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillText(label, px+1, lY+1);
             ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.fillText(label, px, lY);
+        }
+    }
+
+    // ── Local Player Indicator (white triangle) ──
+    if (opts.followPlayer || (Math.abs(localState.x-lx) < range*zoom && Math.abs(localState.z-lz) < range*zoom)) {
+        const d_lx = localState.x - lx, d_lz = localState.z - lz;
+        const {rx: lrx, rz: lrz} = worldToRadar(d_lx, d_lz, rot);
+        const lpx = cx + lrx * scale;
+        const lpy = cy + lrz * scale;
+
+        ctx.save();
+        ctx.translate(lpx, lpy);
+        
+        // If not following player, the triangle still needs to rotate based on player's camera if that's on
+        // but wait, if rotateCamera is ON, the whole world rotates, so the player arrow in the middle
+        // ALWAYS points up. If rotateCamera is OFF, the arrow should point where the camera points.
+        if (!opts.rotateCamera) {
+            const {rx: rfx, rz: rfz} = worldToRadar(-localState.rot[1], -localState.rot[3], [1,0,0,1]);
+            const fAngle = Math.atan2(rfz, rfx) + Math.PI/2;
+            ctx.rotate(fAngle);
+        }
+
+        const lps = 5.0;
+        ctx.beginPath();
+        ctx.moveTo(0, -lps*1.5); ctx.lineTo(-lps, lps); ctx.lineTo(lps, lps);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(240,240,240,1)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+
+        // Local player name
+        if (opts.showNames && localState.name) {
             ctx.font = 'bold 10px Inter, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(p.name || '?', rPos.x, txtY - labelOffset);
-            labelOffset += 12;
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillText(localState.name, lpx+1, lpy - lps*1.5 - 5);
+            ctx.fillStyle = 'rgba(240,240,240,0.9)';
+            ctx.fillText(localState.name, lpx, lpy - lps*1.5 - 6);
         }
-
-        // Distance
-        if (opts.showDistance && local.pos) {
-            const dx = p.pos[0] - local.pos[0];
-            const dz = p.pos[2] - local.pos[2];
-            const dist = Math.round(Math.sqrt(dx*dx + dz*dz));
-            ctx.fillStyle = 'rgba(180,180,200,0.7)';
-            ctx.font = '9px Inter, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${dist}m`, rPos.x, txtY - labelOffset);
-            labelOffset += 11;
-        }
-
-        // Health bar
-        if (opts.showHealth && p.health !== undefined && p.maxHealth) {
-            const hPct = Math.max(0, Math.min(1, p.health / p.maxHealth));
-            const bw = 28, bh = 3;
-            const bx = rPos.x - bw/2, by = rPos.y + opts.dotSize + 4;
-            ctx.fillStyle = '#1a1a20';
-            ctx.fillRect(bx, by, bw, bh);
-            ctx.fillStyle = hPct > 0.5 ? '#44ff88' : hPct > 0.25 ? '#ffaa00' : '#ff4444';
-            ctx.fillRect(bx, by, bw * hPct, bh);
-        }
-    });
-
-    // ── Local Player (always center, arrow points forward) ──
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.shadowBlur  = 12;
-    ctx.shadowColor = '#f3a1fa';
-    ctx.fillStyle   = '#f3a1fa';
-    ctx.beginPath();
-    ctx.moveTo(0, -10);
-    ctx.lineTo(-6, 6);
-    ctx.lineTo(0, 2);
-    ctx.lineTo(6, 6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.restore();
-
-    // Local name
-    if (opts.showNames && local.name) {
-        ctx.fillStyle = '#f3a1fa';
-        ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(local.name, cx, cy - 16);
     }
+
+    // ── Border ──
+    ctx.restore();  // Pop clip
+    ctx.strokeStyle = 'rgba(180,180,210,0.7)';
+    ctx.lineWidth = 1.5;
+    if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke(); }
+    else { ctx.strokeRect(cx - radius, cy - radius, radius*2, radius*2); }
 
     // ── Connection lost ──
     if (lastPacketTime > 0 && Date.now() - lastPacketTime > 5000) {
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle   = '#ff4444';
-        ctx.font        = 'bold 15px Orbitron, sans-serif';
-        ctx.textAlign   = 'center';
-        ctx.fillText('CONNECTION LOST', cx, cy - 12);
-        ctx.font        = '11px Inter, sans-serif';
-        ctx.fillStyle   = '#aaa';
+        ctx.fillStyle = '#ff4444'; ctx.font = 'bold 14px Orbitron, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('CONNECTION LOST', cx, cy - 10);
+        ctx.font = '11px Inter, sans-serif'; ctx.fillStyle = '#ccc';
         ctx.fillText('Waiting for data from cheat...', cx, cy + 14);
     }
 
     requestAnimationFrame(render);
 }
 
-// ── Zoom ───────────────────────────────────────────────────────────────────────
+// ── Zoom ────────────────────────────────────────────────────────────────────
 canvas.onwheel = (e) => {
     e.preventDefault();
     zoom *= e.deltaY < 0 ? 1.1 : 0.9;
-    zoom = Math.max(0.1, Math.min(20, zoom));
+    zoom = Math.max(0.2, Math.min(10, zoom));
     if (zoomValDisplay) zoomValDisplay.textContent = zoom.toFixed(1);
 };
