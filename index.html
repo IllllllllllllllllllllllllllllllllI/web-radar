@@ -13,9 +13,10 @@
             <h1>NEMESIS <span class="accent">RADAR</span></h1>
             <p>Access remote telemetry stream</p>
             <div class="input-group">
-                <input type="text" id="session-code" placeholder="Enter Session Code">
+                <input type="text" id="session-code" placeholder="Enter Session Code" autocomplete="off" spellcheck="false">
                 <button id="connect-btn">CONNECT</button>
             </div>
+            <div id="error-msg" class="error-msg" style="display:none;"></div>
         </div>
     </div>
 

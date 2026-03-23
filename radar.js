@@ -6,12 +6,13 @@ const displayCode = document.getElementById('display-code');
 const canvas = document.getElementById('radar-canvas');
 const ctx = canvas.getContext('2d');
 const zoomValDisplay = document.getElementById('zoom-val');
+const errorMsg = document.getElementById('error-msg');
 
 let eventSource = null;
 let radarData = { players: [], local: { pos: [0,0,0], rot: 0 } };
 let zoom = 1.0;
-let isDragging = false;
-let lastMousePos = { x: 0, y: 0 };
+let lastPacketTime = 0;
+let firstPacketReceived = false;
 
 // Resize handling
 function resize() {
@@ -21,10 +22,26 @@ function resize() {
 window.onresize = resize;
 resize();
 
+function showError(msg) {
+    if (errorMsg) {
+        errorMsg.textContent = msg;
+        errorMsg.style.display = 'block';
+    } else {
+        alert(msg);
+    }
+}
+
+function clearError() {
+    if (errorMsg) errorMsg.style.display = 'none';
+}
+
 function connect() {
     const code = sessionInput.value.trim();
-    if (!code) return alert("Please enter a session code.");
+    if (!code) { showError("Please enter a session code."); return; }
 
+    clearError();
+
+    // ntfy.sh topic
     const topic = `nemesis_radar_${code}`;
     const url = `https://ntfy.sh/${topic}/sse`;
 
@@ -35,67 +52,73 @@ function connect() {
 
     connectBtn.disabled = true;
     connectBtn.textContent = "VERIFYING...";
+    firstPacketReceived = false;
 
-    let firstPacketReceived = false;
     const connectionTimeout = setTimeout(() => {
         if (!firstPacketReceived) {
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
-            }
+            if (eventSource) { eventSource.close(); eventSource = null; }
             connectBtn.disabled = false;
             connectBtn.textContent = "CONNECT";
-            alert("This session code is either invalid or the cheat is not currently broadcasting. Please check the 'Radar' settings in your cheat menu.");
-            
-            // Clear URL param if it was an auto-connect failure
+            showError("Session not found. Make sure the radar is enabled in-game and you copied the exact code.");
             if (window.location.search.includes('code=')) {
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
         }
-    }, 5000); // 5s timeout is sufficient for verification
+    }, 8000);
 
     eventSource = new EventSource(url);
-    
+
     eventSource.onmessage = (e) => {
-        try {
-            const ntfyData = JSON.parse(e.data);
-            
-            // Only process actual messages
-            if (ntfyData.event !== "message" || !ntfyData.message) return;
+        handleMessage(e.data, code, connectionTimeout);
+    };
 
-            const data = JSON.parse(ntfyData.message);
-            if (data.players || data.local) {
-                if (!firstPacketReceived) {
-                    firstPacketReceived = true;
-                    clearTimeout(connectionTimeout);
-                    loginScreen.classList.add('hidden');
-                    radarContainer.classList.remove('hidden');
-                    displayCode.textContent = code;
-                    connectBtn.disabled = false;
-                    connectBtn.textContent = "CONNECT";
-                    requestAnimationFrame(render);
-                }
-                radarData = data;
-                lastPacketTime = Date.now();
-            }
-        } catch (err) {
-            console.error("Parse error:", err);
+    // ntfy.sh also fires typed events
+    eventSource.addEventListener('message', (e) => {
+        handleMessage(e.data, code, connectionTimeout);
+    });
+
+    eventSource.onerror = () => { /* EventSource auto-reconnects */ };
+}
+
+function handleMessage(rawData, code, connectionTimeout) {
+    try {
+        const parsed = JSON.parse(rawData);
+
+        // ntfy.sh wraps data as: { event: "message", message: "<our json string>", ... }
+        let payload = null;
+
+        if (parsed.message && typeof parsed.message === 'string') {
+            // Standard ntfy.sh wrapper
+            try { payload = JSON.parse(parsed.message); } catch (e2) { return; }
+        } else if (parsed.players !== undefined || parsed.local !== undefined) {
+            // Direct JSON (in case ntfy.sh sends raw without wrapper)
+            payload = parsed;
         }
-    };
 
-    eventSource.onopen = () => {
-        console.log("SSE Connection opened, waiting for first packet...");
-    };
+        if (!payload) return;
+        if (payload.players === undefined && payload.local === undefined) return;
 
-    eventSource.onerror = (e) => {
-        console.error("SSE error:", e);
-        // Don't alert here as EventSource often recovers, 
-        // rely on the 5s timeout for initial verification.
-    };
+        if (!firstPacketReceived) {
+            firstPacketReceived = true;
+            clearTimeout(connectionTimeout);
+            clearError();
+            loginScreen.classList.add('hidden');
+            radarContainer.classList.remove('hidden');
+            displayCode.textContent = code;
+            connectBtn.disabled = false;
+            connectBtn.textContent = "CONNECT";
+            requestAnimationFrame(render);
+        }
+
+        radarData = payload;
+        lastPacketTime = Date.now();
+
+    } catch (err) {
+        // Ignore parse errors for heartbeat/control SSE events
+    }
 }
 
 // Auto-connect if code is in URL
-let lastPacketTime = Date.now();
 const urlParams = new URLSearchParams(window.location.search);
 const urlCode = urlParams.get('code');
 if (urlCode) {
@@ -105,24 +128,23 @@ if (urlCode) {
 
 connectBtn.onclick = connect;
 
-function worldToRadar(worldX, worldZ, localX, localZ, localRot, canvasW, canvasH) {
-    const relX = (worldX - localX);
-    const relZ = (worldZ - localZ);
+// Also allow Enter key in input
+sessionInput.onkeydown = (e) => { if (e.key === 'Enter') connect(); };
 
-    // Rotate based on local player rotation
+function worldToRadar(worldX, worldZ, localX, localZ, localRot, canvasW, canvasH) {
+    const relX = worldX - localX;
+    const relZ = worldZ - localZ;
+
     const cos = Math.cos(-localRot);
     const sin = Math.sin(-localRot);
 
     const rotX = relX * cos - relZ * sin;
     const rotZ = relX * sin + relZ * cos;
 
-    const centerX = canvasW / 2;
-    const centerY = canvasH / 2;
-
-    const screenX = centerX + (rotX * zoom);
-    const screenY = centerY + (rotZ * zoom);
-
-    return { x: screenX, y: screenY };
+    return {
+        x: canvasW / 2 + rotX * zoom,
+        y: canvasH / 2 + rotZ * zoom
+    };
 }
 
 function render() {
@@ -133,10 +155,10 @@ function render() {
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // Draw Grid
+    // Grid
     ctx.strokeStyle = '#1a1a20';
     ctx.lineWidth = 1;
-    for(let i = -10; i <= 10; i++) {
+    for (let i = -10; i <= 10; i++) {
         const offset = i * 50 * zoom;
         ctx.beginPath();
         ctx.moveTo(0, cy + offset); ctx.lineTo(canvas.width, cy + offset);
@@ -146,7 +168,7 @@ function render() {
         ctx.stroke();
     }
 
-    // Draw Crosshair
+    // Crosshair
     ctx.strokeStyle = '#303036';
     ctx.beginPath();
     ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
@@ -154,62 +176,74 @@ function render() {
     ctx.stroke();
 
     const local = radarData.local;
-    const players = radarData.players;
+    const players = radarData.players || [];
 
     if (!local || !local.pos) {
         requestAnimationFrame(render);
         return;
     }
 
-    // Draw Players
+    // Players
     players.forEach(p => {
-        const rPos = worldToRadar(p.pos[0], p.pos[2], local.pos[0], local.pos[2], local.rot, canvas.width, canvas.height);
-        
-        // Draw Dot
+        if (!p.pos) return;
+        const rPos = worldToRadar(p.pos[0], p.pos[2], local.pos[0], local.pos[2], local.rot || 0, canvas.width, canvas.height);
+
         ctx.fillStyle = p.isEnemy ? '#ff4444' : '#44ff44';
         ctx.beginPath();
-        ctx.arc(rPos.x, rPos.y, 4, 0, Math.PI * 2);
+        ctx.arc(rPos.x, rPos.y, 5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Draw Name
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.font = '10px Inter';
+        // Health bar
+        if (p.health !== undefined && p.maxHealth) {
+            const hPct = Math.max(0, Math.min(1, p.health / p.maxHealth));
+            const bw = 24, bh = 3;
+            ctx.fillStyle = '#333';
+            ctx.fillRect(rPos.x - bw/2, rPos.y - 14, bw, bh);
+            ctx.fillStyle = hPct > 0.5 ? '#44ff44' : hPct > 0.25 ? '#ffaa00' : '#ff4444';
+            ctx.fillRect(rPos.x - bw/2, rPos.y - 14, bw * hPct, bh);
+        }
+
+        // Name
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '10px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(p.name, rPos.x, rPos.y - 8);
+        ctx.fillText(p.name || '?', rPos.x, rPos.y - 18);
     });
 
-    // Draw Local Player (Center Arrow)
-    ctx.fillStyle = '#f3a1fa';
+    // Local Player Arrow (always centered)
     ctx.save();
     ctx.translate(cx, cy);
+    ctx.fillStyle = '#f3a1fa';
     ctx.beginPath();
-    ctx.moveTo(0, -8);
-    ctx.lineTo(-6, 6);
-    ctx.lineTo(6, 6);
+    ctx.moveTo(0, -9);
+    ctx.lineTo(-6, 7);
+    ctx.lineTo(0, 3);
+    ctx.lineTo(6, 7);
+    ctx.closePath();
     ctx.fill();
     ctx.restore();
 
-    // Check Heartbeat
-    if (Date.now() - lastPacketTime > 5000) {
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    // Connection Lost overlay
+    const now = Date.now();
+    if (lastPacketTime > 0 && now - lastPacketTime > 5000) {
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#ff4444';
-        ctx.font = 'bold 14px Orbitron';
+        ctx.font = 'bold 14px Orbitron, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText("CONNECTION LOST / STREAM PAUSED", cx, cy);
-        ctx.font = '11px Inter';
+        ctx.fillText("CONNECTION LOST", cx, cy - 10);
+        ctx.font = '11px Inter, sans-serif';
         ctx.fillStyle = '#ccc';
-        ctx.fillText("Waiting for data from cheat...", cx, cy + 25);
+        ctx.fillText("Waiting for data from cheat...", cx, cy + 12);
     }
 
     requestAnimationFrame(render);
 }
 
-// Zoom handling
+// Zoom
 canvas.onwheel = (e) => {
     e.preventDefault();
-    if (e.deltaY < 0) zoom *= 1.1;
-    else zoom /= 1.1;
-    zoom = Math.max(0.1, Math.min(10, zoom));
+    zoom *= e.deltaY < 0 ? 1.1 : 0.9;
+    zoom = Math.max(0.1, Math.min(20, zoom));
     zoomValDisplay.textContent = zoom.toFixed(1);
 };
