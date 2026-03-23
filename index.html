@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nemesis Remote Radar</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="login-screen" class="overlay">
+        <div class="login-card">
+            <h1>NEMESIS <span class="accent">RADAR</span></h1>
+            <p>Access remote telemetry stream</p>
+            <div class="input-group">
+                <input type="text" id="session-code" placeholder="Enter Session Code">
+                <button id="connect-btn">CONNECT</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="radar-container" class="hidden">
+        <div class="header">
+            <div class="status-indicator">
+                <span class="dot pulse"></span> LIVE STREAMING
+            </div>
+            <div class="session-info">
+                SESSION: <span id="display-code" class="accent">--------</span>
+            </div>
+        </div>
+        <canvas id="radar-canvas"></canvas>
+        <div class="controls">
+            <div class="zoom-display">ZOOM: <span id="zoom-val">1.0</span>x</div>
+        </div>
+    </div>
+
+    <script src="radar.js"></script>
+</body>
+</html>
