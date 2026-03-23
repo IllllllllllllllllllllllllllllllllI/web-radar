@@ -46,7 +46,12 @@ function connect() {
     eventSource = new EventSource(url);
     eventSource.onmessage = (e) => {
         try {
-            const data = JSON.parse(e.data);
+            const ntfyData = JSON.parse(e.data);
+            
+            // Only process actual messages
+            if (ntfyData.event !== "message" || !ntfyData.message) return;
+
+            const data = JSON.parse(ntfyData.message);
             if (data.players || data.local) {
                 if (!firstPacketReceived) {
                     firstPacketReceived = true;
