@@ -8,13 +8,12 @@ const ctx = canvas.getContext('2d');
 const zoomValDisplay = document.getElementById('zoom-val');
 const errorMsg = document.getElementById('error-msg');
 
-let eventSource = null;
+let pubnub = null;
 let radarData = { players: [], local: { pos: [0,0,0], rot: 0 } };
 let zoom = 1.0;
 let lastPacketTime = 0;
 let firstPacketReceived = false;
 
-// Resize handling
 function resize() {
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
@@ -23,14 +22,8 @@ window.onresize = resize;
 resize();
 
 function showError(msg) {
-    if (errorMsg) {
-        errorMsg.textContent = msg;
-        errorMsg.style.display = 'block';
-    } else {
-        alert(msg);
-    }
+    if (errorMsg) { errorMsg.textContent = msg; errorMsg.style.display = 'block'; }
 }
-
 function clearError() {
     if (errorMsg) errorMsg.style.display = 'none';
 }
@@ -40,23 +33,21 @@ function connect() {
     if (!code) { showError("Please enter a session code."); return; }
 
     clearError();
-
-    // ntfy.sh topic
-    const topic = `nemesis_radar_${code}`;
-    const url = `https://ntfy.sh/${topic}/sse`;
-
-    if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-    }
-
     connectBtn.disabled = true;
     connectBtn.textContent = "VERIFYING...";
     firstPacketReceived = false;
 
+    // Disconnect any existing connection
+    if (pubnub) {
+        pubnub.unsubscribeAll();
+        pubnub = null;
+    }
+
+    const channel = `nemesis_${code}`;
+
     const connectionTimeout = setTimeout(() => {
         if (!firstPacketReceived) {
-            if (eventSource) { eventSource.close(); eventSource = null; }
+            if (pubnub) { pubnub.unsubscribeAll(); pubnub = null; }
             connectBtn.disabled = false;
             connectBtn.textContent = "CONNECT";
             showError("Session not found. Make sure the radar is enabled in-game and you copied the exact code.");
@@ -66,84 +57,67 @@ function connect() {
         }
     }, 8000);
 
-    eventSource = new EventSource(url);
-
-    eventSource.onmessage = (e) => {
-        handleMessage(e.data, code, connectionTimeout);
-    };
-
-    // ntfy.sh also fires typed events
-    eventSource.addEventListener('message', (e) => {
-        handleMessage(e.data, code, connectionTimeout);
+    // Initialize PubNub with demo keys (no signup required for testing)
+    pubnub = new PubNub({
+        publishKey: 'demo',
+        subscribeKey: 'demo',
+        uuid: 'radar-viewer-' + Math.random().toString(36).substr(2, 6)
     });
 
-    eventSource.onerror = () => { /* EventSource auto-reconnects */ };
+    pubnub.addListener({
+        message: (event) => {
+            try {
+                const data = event.message;
+                if (!data || (data.players === undefined && data.local === undefined)) return;
+
+                if (!firstPacketReceived) {
+                    firstPacketReceived = true;
+                    clearTimeout(connectionTimeout);
+                    clearError();
+                    loginScreen.classList.add('hidden');
+                    radarContainer.classList.remove('hidden');
+                    displayCode.textContent = code;
+                    connectBtn.disabled = false;
+                    connectBtn.textContent = "CONNECT";
+                    requestAnimationFrame(render);
+                }
+
+                radarData = data;
+                lastPacketTime = Date.now();
+            } catch (err) {
+                console.error("Parse error:", err);
+            }
+        },
+        status: (event) => {
+            console.log("PubNub status:", event.category);
+        }
+    });
+
+    pubnub.subscribe({ channels: [channel] });
 }
 
-function handleMessage(rawData, code, connectionTimeout) {
-    try {
-        const parsed = JSON.parse(rawData);
-
-        // ntfy.sh wraps data as: { event: "message", message: "<our json string>", ... }
-        let payload = null;
-
-        if (parsed.message && typeof parsed.message === 'string') {
-            // Standard ntfy.sh wrapper
-            try { payload = JSON.parse(parsed.message); } catch (e2) { return; }
-        } else if (parsed.players !== undefined || parsed.local !== undefined) {
-            // Direct JSON (in case ntfy.sh sends raw without wrapper)
-            payload = parsed;
-        }
-
-        if (!payload) return;
-        if (payload.players === undefined && payload.local === undefined) return;
-
-        if (!firstPacketReceived) {
-            firstPacketReceived = true;
-            clearTimeout(connectionTimeout);
-            clearError();
-            loginScreen.classList.add('hidden');
-            radarContainer.classList.remove('hidden');
-            displayCode.textContent = code;
-            connectBtn.disabled = false;
-            connectBtn.textContent = "CONNECT";
-            requestAnimationFrame(render);
-        }
-
-        radarData = payload;
-        lastPacketTime = Date.now();
-
-    } catch (err) {
-        // Ignore parse errors for heartbeat/control SSE events
-    }
-}
-
-// Auto-connect if code is in URL
+// Auto-connect from URL
 const urlParams = new URLSearchParams(window.location.search);
 const urlCode = urlParams.get('code');
 if (urlCode) {
     sessionInput.value = urlCode;
-    connect();
+    // Wait for PubNub SDK to load then connect
+    window.addEventListener('load', () => { setTimeout(connect, 300); });
+} else {
+    window.addEventListener('load', () => {});
 }
 
 connectBtn.onclick = connect;
-
-// Also allow Enter key in input
 sessionInput.onkeydown = (e) => { if (e.key === 'Enter') connect(); };
 
 function worldToRadar(worldX, worldZ, localX, localZ, localRot, canvasW, canvasH) {
     const relX = worldX - localX;
     const relZ = worldZ - localZ;
-
     const cos = Math.cos(-localRot);
     const sin = Math.sin(-localRot);
-
-    const rotX = relX * cos - relZ * sin;
-    const rotZ = relX * sin + relZ * cos;
-
     return {
-        x: canvasW / 2 + rotX * zoom,
-        y: canvasH / 2 + rotZ * zoom
+        x: canvasW / 2 + (relX * cos - relZ * sin) * zoom,
+        y: canvasH / 2 + (relX * sin + relZ * cos) * zoom
     };
 }
 
@@ -151,37 +125,25 @@ function render() {
     if (radarContainer.classList.contains('hidden')) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
     // Grid
-    ctx.strokeStyle = '#1a1a20';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#1a1a20'; ctx.lineWidth = 1;
     for (let i = -10; i <= 10; i++) {
         const offset = i * 50 * zoom;
-        ctx.beginPath();
-        ctx.moveTo(0, cy + offset); ctx.lineTo(canvas.width, cy + offset);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(cx + offset, 0); ctx.lineTo(cx + offset, canvas.height);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, cy + offset); ctx.lineTo(canvas.width, cy + offset); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + offset, 0); ctx.lineTo(cx + offset, canvas.height); ctx.stroke();
     }
 
     // Crosshair
     ctx.strokeStyle = '#303036';
-    ctx.beginPath();
-    ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
-    ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
+    ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy); ctx.stroke();
 
     const local = radarData.local;
     const players = radarData.players || [];
-
-    if (!local || !local.pos) {
-        requestAnimationFrame(render);
-        return;
-    }
+    if (!local || !local.pos) { requestAnimationFrame(render); return; }
 
     // Players
     players.forEach(p => {
@@ -189,9 +151,7 @@ function render() {
         const rPos = worldToRadar(p.pos[0], p.pos[2], local.pos[0], local.pos[2], local.rot || 0, canvas.width, canvas.height);
 
         ctx.fillStyle = p.isEnemy ? '#ff4444' : '#44ff44';
-        ctx.beginPath();
-        ctx.arc(rPos.x, rPos.y, 5, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(rPos.x, rPos.y, 5, 0, Math.PI * 2); ctx.fill();
 
         // Health bar
         if (p.health !== undefined && p.maxHealth) {
@@ -203,44 +163,30 @@ function render() {
             ctx.fillRect(rPos.x - bw/2, rPos.y - 14, bw * hPct, bh);
         }
 
-        // Name
         ctx.fillStyle = 'rgba(255,255,255,0.8)';
         ctx.font = '10px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(p.name || '?', rPos.x, rPos.y - 18);
     });
 
-    // Local Player Arrow (always centered)
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.fillStyle = '#f3a1fa';
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(-6, 7);
-    ctx.lineTo(0, 3);
-    ctx.lineTo(6, 7);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    // Local player arrow
+    ctx.save(); ctx.translate(cx, cy); ctx.fillStyle = '#f3a1fa';
+    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(-6, 7); ctx.lineTo(0, 3); ctx.lineTo(6, 7);
+    ctx.closePath(); ctx.fill(); ctx.restore();
 
-    // Connection Lost overlay
-    const now = Date.now();
-    if (lastPacketTime > 0 && now - lastPacketTime > 5000) {
+    // Connection lost
+    if (lastPacketTime > 0 && Date.now() - lastPacketTime > 5000) {
         ctx.fillStyle = 'rgba(0,0,0,0.65)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ff4444';
-        ctx.font = 'bold 14px Orbitron, sans-serif';
-        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff4444'; ctx.font = 'bold 14px Orbitron, sans-serif'; ctx.textAlign = 'center';
         ctx.fillText("CONNECTION LOST", cx, cy - 10);
-        ctx.font = '11px Inter, sans-serif';
-        ctx.fillStyle = '#ccc';
+        ctx.font = '11px Inter, sans-serif'; ctx.fillStyle = '#ccc';
         ctx.fillText("Waiting for data from cheat...", cx, cy + 12);
     }
 
     requestAnimationFrame(render);
 }
 
-// Zoom
 canvas.onwheel = (e) => {
     e.preventDefault();
     zoom *= e.deltaY < 0 ? 1.1 : 0.9;
