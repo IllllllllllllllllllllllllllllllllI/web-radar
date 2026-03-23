@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Login -->
     <div id="login-screen" class="overlay">
         <div class="login-card">
             <h1>NEMESIS <span class="accent">RADAR</span></h1>
@@ -20,6 +21,7 @@
         </div>
     </div>
 
+    <!-- Radar -->
     <div id="radar-container" class="hidden">
         <div class="header">
             <div class="status-indicator">
@@ -28,15 +30,43 @@
             <div class="session-info">
                 SESSION: <span id="display-code" class="accent">--------</span>
             </div>
+            <div class="header-right">
+                <button id="options-btn" class="opts-btn">⚙ OPTIONS</button>
+            </div>
         </div>
-        <canvas id="radar-canvas"></canvas>
+
+        <div class="radar-wrapper">
+            <canvas id="radar-canvas"></canvas>
+
+            <!-- Options Panel -->
+            <div id="options-panel" class="options-panel" style="display:none;">
+                <div class="opt-section-title">DISPLAY</div>
+                <label class="opt-row"><input type="checkbox" id="opt-names"    checked> Names</label>
+                <label class="opt-row"><input type="checkbox" id="opt-health"   checked> Health Bars</label>
+                <label class="opt-row"><input type="checkbox" id="opt-distance" checked> Distance</label>
+                <label class="opt-row"><input type="checkbox" id="opt-team"     checked> Show Teammates</label>
+                <label class="opt-row"><input type="checkbox" id="opt-dead"> Show Dead</label>
+
+                <div class="opt-section-title" style="margin-top:12px;">DOT SIZE</div>
+                <div class="opt-row">
+                    <input type="range" id="opt-dotsize" min="3" max="12" value="5" class="opt-slider">
+                    <span id="opt-dotsize-val">5</span>
+                </div>
+            </div>
+        </div>
+
         <div class="controls">
-            <div class="zoom-display">ZOOM: <span id="zoom-val">1.0</span>x</div>
+            <div class="zoom-display">ZOOM: <span id="zoom-val">1.0</span>x &nbsp;|&nbsp; Scroll to zoom</div>
         </div>
     </div>
 
-    <!-- PubNub SDK - works on all networks including restricted ones -->
     <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.4.3.min.js"></script>
     <script src="radar.js"></script>
+    <script>
+        // Dot size slider live update
+        const ds = document.getElementById('opt-dotsize');
+        const dsVal = document.getElementById('opt-dotsize-val');
+        if (ds && dsVal) ds.oninput = () => { dsVal.textContent = ds.value; };
+    </script>
 </body>
 </html>
