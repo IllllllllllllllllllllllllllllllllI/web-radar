@@ -25,7 +25,6 @@ body {
 .hidden { display: none !important; }
 .accent { color: var(--accent); }
 
-/* ── Login Overlay ─────────────────────────────────────────────────────── */
 .overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: radial-gradient(circle at center, #1b1b22 0%, #0a0a0c 100%);
@@ -87,7 +86,6 @@ body {
     border-radius: 2px; color: #ff6666; font-size: 11px;
 }
 
-/* ── Radar Layout ──────────────────────────────────────────────────────── */
 #radar-container {
     display: flex; flex-direction: column; height: 100vh; padding: 10px;
 }
@@ -114,7 +112,6 @@ body {
 }
 #radar-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
 
-/* ── Premium Widgets ───────────────────────────────────────────────────── */
 .opts-btn {
     background: #1a1a20; border: 1px solid var(--border);
     color: var(--text-main); padding: 5px 12px; border-radius: 2px;
@@ -150,7 +147,6 @@ body {
     margin-bottom: 10px; opacity: 0.8;
 }
 
-/* ── Checkboxes ── */
 .custom-checkbox {
     display: flex; align-items: center; position: relative;
     padding-left: 28px; margin-bottom: 8px; cursor: pointer;
@@ -172,7 +168,6 @@ body {
 }
 .custom-checkbox input:checked ~ .checkmark:after { display: block; }
 
-/* ── Dropdowns / Combos ── */
 .widget-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .widget-label { font-size: 10px; color: var(--text-dim); font-weight: 600; letter-spacing: 0.5px; }
 .custom-select-wrapper { width: 90px; }
@@ -183,7 +178,6 @@ body {
 }
 .custom-select:hover { border-color: var(--accent); }
 
-/* ── Sliders ── */
 .slider-col { flex-direction: column; align-items: flex-start; gap: 6px; }
 .slider-header { width: 100%; display: flex; justify-content: space-between; align-items: center; }
 .slider-value { font-size: 10px; color: var(--accent); font-family: 'Orbitron', sans-serif; }
@@ -197,7 +191,6 @@ body {
     border-radius: 50%; cursor: pointer; border: 2px solid #000;
 }
 
-/* ── Footer ────────────────────────────────────────────────────────────── */
 .footer {
     display: flex; align-items: center; justify-content: space-between;
     padding-top: 8px; border-top: 1px solid var(--border);
