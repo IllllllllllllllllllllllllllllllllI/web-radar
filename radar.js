@@ -21,10 +21,18 @@ let firstPacketReceived = false;
 let snapshot = { players: [], local: { pos:[0,0,0], rot:[1,0,0,1], name:'', range:500 } };
 
 // Map parts (cached, updated infrequently)
-let mapParts = [];    // [{cx, cz, sx, sz, r00, r02, r20, r22}, ...]
+let mapParts     = [];      // Final parts drawn
+let pendingParts = [];      // Chunks being collected
+let lastMapId    = "";
+
+// Theme from cheat
+const theme = {
+    accent:  [243, 161, 251], // RBG 0-255
+    opacity: 0.9
+};
 
 // Smooth interpolation: per-player state keyed by name
-const playerStates = {};  // name -> {x, z, fx, fz, health, maxHealth, isEnemy}
+const playerStates = {};
 
 // Smooth local player interpolation
 const localState = { x: 0, z: 0, rot: [1, 0, 0, 1], range: 500 };
@@ -133,6 +141,13 @@ function connect() {
                     localState.range = data.local.range || 500;
                     localState.name = data.local.name;
                     
+                    if (data.local.theme) {
+                        theme.accent[0] = Math.round(data.local.theme.accent[0] * 255);
+                        theme.accent[1] = Math.round(data.local.theme.accent[1] * 255);
+                        theme.accent[2] = Math.round(data.local.theme.accent[2] * 255);
+                        theme.opacity   = data.local.theme.opacity;
+                    }
+
                     // Initial snap
                     if (localState.x === 0 && localState.z === 0) {
                         localState.x = localState.targetX;
@@ -162,12 +177,20 @@ function connect() {
                 for (const k of Object.keys(playerStates)) if (!names.has(k)) delete playerStates[k];
             }
 
-            // Handle map data channel (now separate and chunked)
+            // Handle map data channel (separate and chunked)
             if (data.map) {
-                if (data.chunk === 0) mapParts = []; // Start of new map Snapshot
-                mapParts = mapParts.concat(data.map);
+                // If mapId changed, reset pending buffer
+                if (data.mapId !== lastMapId) {
+                    pendingParts = [];
+                    lastMapId = data.mapId;
+                }
+                
+                pendingParts = pendingParts.concat(data.map);
+                
+                // If this was the last chunk of this version, swap!
                 if (data.chunk === data.total - 1) {
-                    console.log(`Map complete: ${mapParts.length} parts`);
+                    mapParts = pendingParts;
+                    console.log(`[WebRadar] Map Updated: ${mapParts.length} parts (ID: ${lastMapId})`);
                 }
             }
         } catch(e) { console.error(e); }
@@ -258,20 +281,21 @@ function render() {
         ctx.beginPath(); ctx.rect(cx - radius, cy - radius, radius * 2, radius * 2); ctx.clip();
     }
 
-    ctx.fillStyle = 'rgba(5,5,5,0.95)';
+    const opacity = theme.opacity;
+    const accent  = `rgba(${theme.accent[0]}, ${theme.accent[1]}, ${theme.accent[2]}, ${opacity})`;
+
+    ctx.fillStyle = `rgba(5,5,5,${opacity})`;
     if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill(); }
     else { ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2); }
 
     // ── Grid (5 lines each way like in-game) ──
-    ctx.strokeStyle = 'rgba(70,70,80,0.5)';
+    ctx.strokeStyle = `rgba(70,70,80,${0.31 * opacity})`;
     ctx.lineWidth = 1;
     if (isCirc) {
         for (let i = 0; i <= 4; i++) {
             const off = (radius * 2 / 4) * i - radius;
-            // Vertical
             const ab = Math.sqrt(Math.max(0, radius*radius - off*off));
             ctx.beginPath(); ctx.moveTo(cx + off, cy - ab); ctx.lineTo(cx + off, cy + ab); ctx.stroke();
-            // Horizontal
             ctx.beginPath(); ctx.moveTo(cx - ab, cy + off); ctx.lineTo(cx + ab, cy + off); ctx.stroke();
         }
         ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI*2); ctx.stroke();
@@ -281,13 +305,14 @@ function render() {
             ctx.beginPath(); ctx.moveTo(cx + off, cy - radius); ctx.lineTo(cx + off, cy + radius); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(cx - radius, cy + off); ctx.lineTo(cx + radius, cy + off); ctx.stroke();
         }
+        ctx.strokeRect(cx - radius*0.5, cy - radius*0.5, radius, radius);
     }
 
     // ── Map Parts ──
     if (opts.showMap && mapParts.length > 0) {
-        ctx.fillStyle   = 'rgba(40,40,45,0.7)';
-        ctx.strokeStyle = 'rgba(70,70,80,0.5)';
-        ctx.lineWidth   = 0.8;
+        ctx.fillStyle   = `rgba(40,40,45,${0.47 * opacity})`;
+        ctx.strokeStyle = `rgba(70,70,80,${0.31 * opacity})`;
+        ctx.lineWidth   = 1.0;
 
         for (const part of mapParts) {
             // part = [cx, cz, sx, sz, r00, r02, r20, r22]
@@ -318,7 +343,7 @@ function render() {
     }
 
     // ── Crosshair ──
-    ctx.strokeStyle = 'rgba(70,70,80,0.8)';
+    ctx.strokeStyle = `rgba(70,70,80,${0.8 * opacity})`;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
@@ -355,8 +380,8 @@ function render() {
         // Rotate player facing through camera
         const {rx: rfx, rz: rfz} = worldToRadar(st.fx, st.fz, rot);
         const fLen = Math.sqrt(rfx*rfx + rfz*rfz);
-        const dotColor = st.isEnemy ? 'rgba(255,60,60,1)' : 'rgba(173,216,230,1)';
-        const outColor = 'rgba(0,0,0,0.8)';
+        const dotColor = st.isEnemy ? `rgba(255,60,60,${opacity})` : `rgba(173,216,230,${opacity})`;
+        const outColor = `rgba(0,0,0,${0.8 * opacity})`;
 
         if (fLen > 0.001) {
             const nfx = rfx/fLen, nfz = rfz/fLen;
@@ -416,9 +441,9 @@ function render() {
         ctx.beginPath();
         ctx.moveTo(0, -lps*1.5); ctx.lineTo(-lps, lps); ctx.lineTo(lps, lps);
         ctx.closePath();
-        ctx.fillStyle = 'rgba(240,240,240,1)';
+        ctx.fillStyle = `rgba(240,240,240,${opacity})`;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.strokeStyle = `rgba(0,0,0,${0.7 * opacity})`;
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.restore();
@@ -436,7 +461,7 @@ function render() {
 
     // ── Border ──
     ctx.restore();  // Pop clip
-    ctx.strokeStyle = 'rgba(180,180,210,0.7)';
+    ctx.strokeStyle = accent;
     ctx.lineWidth = 1.5;
     if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke(); }
     else { ctx.strokeRect(cx - radius, cy - radius, radius*2, radius*2); }
