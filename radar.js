@@ -118,6 +118,7 @@ function connect() {
             // Handle player/local data channel
             if (data.players !== undefined || data.local !== undefined) {
                 if (!firstPacketReceived) {
+                    console.log("[WebRadar] First valid packet received! Initializing UI...", data);
                     firstPacketReceived = true;
                     clearTimeout(timeout);
                     clearError();
@@ -132,6 +133,7 @@ function connect() {
 
                 snapshot = data;
                 lastPacketTime = Date.now();
+                // console.log("[WebRadar] Snapshot updated:", data.players?.length || 0, "players");
 
                 // Update local interpolation targets
                 if (data.local) {
@@ -284,7 +286,12 @@ function render() {
     const opacity = theme.opacity;
     const accent  = `rgba(${theme.accent[0]}, ${theme.accent[1]}, ${theme.accent[2]}, ${opacity})`;
 
-    ctx.fillStyle = `rgba(5,5,5,${opacity})`;
+    // Subtle radial gradient background
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    grad.addColorStop(0, `rgba(12,12,16,${opacity * 0.95})`);
+    grad.addColorStop(1, `rgba(5,5,7,${opacity * 0.98})`);
+    ctx.fillStyle = grad;
+
     if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill(); }
     else { ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2); }
 
@@ -383,6 +390,10 @@ function render() {
         const dotColor = st.isEnemy ? `rgba(255,60,60,${opacity})` : `rgba(173,216,230,${opacity})`;
         const outColor = `rgba(0,0,0,${0.8 * opacity})`;
 
+        // Glow effect
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = st.isEnemy ? 'rgba(255,60,60,0.5)' : 'rgba(173,216,230,0.5)';
+
         if (fLen > 0.001) {
             const nfx = rfx/fLen, nfz = rfz/fLen;
             const s = opts.dotSize;
@@ -398,6 +409,8 @@ function render() {
             ctx.fillStyle = dotColor; ctx.fill();
             ctx.strokeStyle = outColor; ctx.lineWidth = 1; ctx.stroke();
         }
+        ctx.shadowBlur = 0; // Reset for next draw
+
 
         // Labels (name [hp] dist)
         let label = '';
@@ -439,13 +452,17 @@ function render() {
 
         const lps = 5.0;
         ctx.beginPath();
-        ctx.moveTo(0, -lps*1.5); ctx.lineTo(-lps, lps); ctx.lineTo(lps, lps);
+        ctx.moveTo(0, -lps*1.8); ctx.lineTo(-lps*1.2, lps); ctx.lineTo(lps*1.2, lps);
         ctx.closePath();
-        ctx.fillStyle = `rgba(240,240,240,${opacity})`;
+        
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = `rgba(255,255,255,0.4)`;
+        ctx.fillStyle = `rgba(255,255,255,${opacity})`;
         ctx.fill();
-        ctx.strokeStyle = `rgba(0,0,0,${0.7 * opacity})`;
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = `rgba(0,0,0,${0.8 * opacity})`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
+        ctx.shadowBlur = 0;
         ctx.restore();
 
         // Local player name
@@ -468,12 +485,19 @@ function render() {
 
     // ── Connection lost ──
     if (lastPacketTime > 0 && Date.now() - lastPacketTime > 5000) {
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
         ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = '#ff4444'; ctx.font = 'bold 14px Orbitron, sans-serif'; ctx.textAlign = 'center';
+        
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ff4444';
+        ctx.fillStyle = '#ff4444'; 
+        ctx.font = 'bold 16px Orbitron, sans-serif'; 
+        ctx.textAlign = 'center';
         ctx.fillText('CONNECTION LOST', cx, cy - 10);
-        ctx.font = '11px Inter, sans-serif'; ctx.fillStyle = '#ccc';
-        ctx.fillText('Waiting for data from cheat...', cx, cy + 14);
+        
+        ctx.shadowBlur = 0;
+        ctx.font = '12px Inter, sans-serif'; ctx.fillStyle = '#aaa';
+        ctx.fillText('Waiting for data from cheat...', cx, cy + 18);
     }
 
     requestAnimationFrame(render);

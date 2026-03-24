@@ -11,11 +11,9 @@
     <!-- Login Screen -->
     <div id="login-screen" class="overlay">
         <div class="login-card">
-            <h1>NEMESIS <span class="accent">RADAR</span></h1>
-            <p>Access remote telemetry stream</p>
             <div class="input-group">
                 <div class="input-wrapper">
-                    <input type="text" id="session-code" placeholder="ENTER PLAYER CODE" autocomplete="off" spellcheck="false">
+                    <input type="text" id="session-code" placeholder="ENTER SESSION CODE" autocomplete="off" spellcheck="false">
                 </div>
                 <button id="connect-btn">CONNECT</button>
             </div>
@@ -27,13 +25,13 @@
     <div id="radar-container" class="hidden">
         <div class="header">
             <div class="status-indicator">
-                <span class="dot pulse"></span> <span class="status-text">LIVE TELEMETRY</span>
+                <span class="dot pulse"></span> <span class="status-text">CONNECTED</span>
             </div>
             <div class="session-info">
                 SESSION: <span id="display-code" class="accent">--------</span>
             </div>
             <div class="header-right">
-                <button id="options-btn" class="opts-btn">⚙ CONFIG</button>
+                <button id="options-btn" class="opts-btn">CONFIG</button>
             </div>
         </div>
 
@@ -49,22 +47,22 @@
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-names">
                         <span class="checkmark"></span>
-                        Show Names
+                        Name
                     </label>
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-health">
                         <span class="checkmark"></span>
-                        Health Bars
+                        Health
                     </label>
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-distance">
                         <span class="checkmark"></span>
-                        Distance Info
+                        Distance
                     </label>
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-team">
                         <span class="checkmark"></span>
-                        Teammates
+                        Show Team
                     </label>
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-dead">
@@ -74,7 +72,7 @@
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-map">
                         <span class="checkmark"></span>
-                        Map Geometry
+                        Show Map
                     </label>
                     <label class="custom-checkbox">
                         <input type="checkbox" id="opt-follow">
@@ -116,7 +114,7 @@
             <div class="zoom-info">
                 ZOOM: <span id="zoom-val">1.0</span>x <span class="hint">| SCROLL TO ZOOM</span>
             </div>
-            <div class="version">NEMESIS REMOTE V2.1</div>
+            <div class="version">NEMESIS</div>
         </div>
     </div>
 

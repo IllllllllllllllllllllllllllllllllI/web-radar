@@ -1,14 +1,14 @@
 :root {
-    --bg-dark:    #0a0a0c;
-    --panel-bg:   rgba(18, 18, 22, 0.9);
+    --bg-dark:    #08080a;
+    --panel-bg:   rgba(14, 14, 18, 0.85);
     --accent:     #f3a1fa;
-    --accent-dim: rgba(243, 161, 250, 0.2);
-    --accent-glow:rgba(243, 161, 250, 0.5);
-    --text-main:  #e0e0e6;
-    --text-dim:   #90909a;
-    --border:     #25252b;
-    --widget-bg:  #0d0d0f;
-    --widget-brd: #303036;
+    --accent-dim: rgba(243, 161, 250, 0.15);
+    --accent-glow:rgba(243, 161, 250, 0.4);
+    --text-main:  #f0f0f5;
+    --text-dim:   #a0a0ab;
+    --border:     rgba(255, 255, 255, 0.08);
+    --widget-bg:  #0a0a0c;
+    --widget-brd: rgba(255, 255, 255, 0.12);
     --success:    #44ff88;
 }
 
@@ -34,16 +34,28 @@ body {
 .login-card {
     background: var(--panel-bg);
     border: 1px solid var(--border);
-    padding: 40px; border-radius: 4px;
-    text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-    width: 360px;
-    backdrop-filter: blur(10px);
+    padding: 40px; border-radius: 8px;
+    text-align: center; 
+    box-shadow: 0 20px 50px rgba(0,0,0,0.9), 0 0 1px rgba(255,255,255,0.1) inset;
+    width: 340px;
+    backdrop-filter: blur(20px);
+    animation: fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+@keyframes fade-up {
+    from { opacity: 0; transform: translateY(20px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .login-card h1 {
     font-family: 'Orbitron', sans-serif;
     font-size: 26px; letter-spacing: 3px; margin-bottom: 8px;
+    background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
-.login-card p { color: var(--text-dim); font-size: 11px; margin-bottom: 30px; letter-spacing: 1px; }
+.login-card p { color: var(--text-dim); font-size: 11px; margin-bottom: 30px; letter-spacing: 1px; opacity: 0.8; }
 
 .input-group input {
     width: 100%; background: #070708; border: 1px solid var(--widget-brd);
@@ -54,12 +66,18 @@ body {
 .input-group input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px var(--accent-dim); }
 
 .input-group button {
-    width: 100%; background: var(--accent); color: black;
-    border: none; padding: 14px; border-radius: 2px;
+    width: 100%; background: linear-gradient(135deg, var(--accent) 0%, #d484db 100%);
+    color: #000;
+    border: none; padding: 14px; border-radius: 4px;
     font-weight: 700; font-family: 'Orbitron', sans-serif;
-    cursor: pointer; transition: 0.2s; letter-spacing: 2px;
+    cursor: pointer; transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1); 
+    letter-spacing: 2px;
 }
-.input-group button:hover { transform: translateY(-1px); box-shadow: 0 0 20px var(--accent-glow); }
+.input-group button:hover { 
+    transform: translateY(-2px); 
+    box-shadow: 0 8px 25px var(--accent-glow); 
+    filter: brightness(1.1);
+}
 .input-group button:active { transform: translateY(0); }
 .input-group button:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -107,11 +125,17 @@ body {
 
 .options-panel {
     position: absolute; top: 15px; right: 15px;
-    width: 210px; background: var(--panel-bg);
-    border: 1px solid var(--border); border-radius: 3px;
+    width: 220px; background: var(--panel-bg);
+    border: 1px solid var(--border); border-radius: 6px;
     padding: 15px; z-index: 10;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 15px 35px rgba(0,0,0,0.8), 0 0 1px rgba(255,255,255,0.05) inset;
+    animation: panel-slide 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes panel-slide {
+    from { opacity: 0; transform: translateX(10px); }
+    to { opacity: 1; transform: translateX(0); }
 }
 .panel-header {
     font-family: 'Orbitron', sans-serif; font-size: 9px;
