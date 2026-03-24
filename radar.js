@@ -1,4 +1,3 @@
-// ── DOM ──────────────────────────────────────────────────────────────────────
 const loginScreen    = document.getElementById('login-screen');
 const radarContainer = document.getElementById('radar-container');
 const sessionInput   = document.getElementById('session-code');
@@ -11,30 +10,24 @@ const errorMsg       = document.getElementById('error-msg');
 const optionsBtn     = document.getElementById('options-btn');
 const optionsPanel   = document.getElementById('options-panel');
 
-// ── State ────────────────────────────────────────────────────────────────────
 let pubnub = null;
 let zoom   = 1.0;
 let lastPacketTime   = 0;
 let firstPacketReceived = false;
 
-// Latest snapshot from cheat (raw)
 let snapshot = { players: [], local: { pos:[0,0,0], rot:[1,0,0,1], name:'', range:500 } };
 
-// Map parts (cached, updated infrequently)
-let mapParts     = [];      // Final parts drawn
-let pendingParts = [];      // Chunks being collected
+let mapParts     = [];      
+let pendingParts = [];     
 let lastMapId    = "";
 
-// Theme from cheat
 const theme = {
-    accent:  [243, 161, 251], // RBG 0-255
+    accent:  [243, 161, 251], 
     opacity: 0.9
 };
 
-// Smooth interpolation: per-player state keyed by name
 const playerStates = {};
 
-// Smooth local player interpolation
 const localState = { x: 0, z: 0, rot: [1, 0, 0, 1], range: 500 };
 
 // Options
@@ -47,7 +40,7 @@ const opts = {
     showMap:      false,
     followPlayer: false,
     rotateCamera: false,
-    shape:       'circle',  // 'circle' | 'square'
+    shape:       'circle',  
     dotSize:      4.5,
 };
 
@@ -67,7 +60,6 @@ function syncOpts() {
 document.querySelectorAll('#options-panel input, #options-panel select').forEach(el =>
     el.addEventListener('change', syncOpts));
 
-// ── Canvas ────────────────────────────────────────────────────────────────────
 function resize() {
     canvas.width  = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
@@ -75,7 +67,6 @@ function resize() {
 window.onresize = resize;
 resize();
 
-// ── Error ────────────────────────────────────────────────────────────────────
 function showError(msg) {
     if (errorMsg) { errorMsg.textContent = msg; errorMsg.style.display = 'block'; }
 }
@@ -83,7 +74,6 @@ function clearError() {
     if (errorMsg) errorMsg.style.display = 'none';
 }
 
-// ── Connect ──────────────────────────────────────────────────────────────────
 function connect() {
     const code = sessionInput.value.trim();
     if (!code) { showError('Please enter a session code.'); return; }
@@ -115,16 +105,15 @@ function connect() {
             const data = ev.message;
             if (!data) return;
 
-            // Handle player/local data channel
             if (data.players !== undefined || data.local !== undefined) {
                 if (!firstPacketReceived) {
-                    console.log("[WebRadar] First valid packet received! Initializing UI...", data);
+                    console.log("first valid packet received, starting ui", data);
                     firstPacketReceived = true;
                     clearTimeout(timeout);
                     clearError();
                     loginScreen.classList.add('hidden');
                     radarContainer.classList.remove('hidden');
-                    resize();   // CRITICAL: canvas was 0x0 while hidden
+                    resize();  
                     displayCode.textContent = code;
                     connectBtn.disabled = false;
                     connectBtn.textContent = 'CONNECT';
@@ -133,9 +122,7 @@ function connect() {
 
                 snapshot = data;
                 lastPacketTime = Date.now();
-                // console.log("[WebRadar] Snapshot updated:", data.players?.length || 0, "players");
 
-                // Update local interpolation targets
                 if (data.local) {
                     localState.targetX = data.local.pos[0];
                     localState.targetZ = data.local.pos[2];
@@ -150,7 +137,6 @@ function connect() {
                         theme.opacity   = data.local.theme.opacity;
                     }
 
-                    // Initial snap
                     if (localState.x === 0 && localState.z === 0) {
                         localState.x = localState.targetX;
                         localState.z = localState.targetZ;
@@ -158,7 +144,6 @@ function connect() {
                     }
                 }
 
-                // Update interpolation targets
                 const players = data.players || [];
                 for (const p of players) {
                     if (!p.name) continue;
@@ -174,14 +159,11 @@ function connect() {
                         st.dead = (p.health !== undefined && p.health <= 0);
                     }
                 }
-                // Remove players who left
                 const names = new Set(players.map(p => p.name));
                 for (const k of Object.keys(playerStates)) if (!names.has(k)) delete playerStates[k];
             }
 
-            // Handle map data channel (separate and chunked)
             if (data.map) {
-                // If mapId changed, reset pending buffer
                 if (data.mapId !== lastMapId) {
                     pendingParts = [];
                     lastMapId = data.mapId;
@@ -189,10 +171,9 @@ function connect() {
                 
                 pendingParts = pendingParts.concat(data.map);
                 
-                // If this was the last chunk of this version, swap!
                 if (data.chunk === data.total - 1) {
                     mapParts = pendingParts;
-                    console.log(`[WebRadar] Map Updated: ${mapParts.length} parts (ID: ${lastMapId})`);
+                    console.log(`map updated: ${mapParts.length} parts (ID: ${lastMapId})`);
                 }
             }
         } catch(e) { console.error(e); }
@@ -215,16 +196,12 @@ if (optionsBtn && optionsPanel) {
     };
 }
 
-// ── WorldToRadar: mirrors radar.h WorldToRadar exactly ─────────────────────
-// rot = [r00, r02, r20, r22]
 function worldToRadar(dx, dz, rot) {
     const r00 = rot[0], r02 = rot[1], r20 = rot[2], r22 = rot[3];
-    // Forward vector: (-r02, -r22)
     let fX = -r02, fZ = -r22;
     const fLen = Math.sqrt(fX*fX + fZ*fZ);
     if (fLen < 0.001) return { rx: dx, rz: dz };
     fX /= fLen; fZ /= fLen;
-    // Right vector: (r00, r20)
     let rX = r00, rZ = r20;
     const rLen = Math.sqrt(rX*rX + rZ*rZ);
     if (rLen > 0.001) { rX /= rLen; rZ /= rLen; }
@@ -235,21 +212,18 @@ function worldToRadar(dx, dz, rot) {
     };
 }
 
-// ── Render ───────────────────────────────────────────────────────────────────
 let lastFrameTime = performance.now();
 
 function render() {
     if (radarContainer.classList.contains('hidden')) return;
     if (canvas.width === 0 || canvas.height === 0) { resize(); requestAnimationFrame(render); return; }
 
-    // Interpolation delta
     const now = performance.now();
     const dt  = Math.min((now - lastFrameTime) / 1000, 0.1);
     lastFrameTime = now;
     const lerpSpeed = 12.0;
     const lerpK = Math.min(1.0, lerpSpeed * dt);
 
-    // Interpolate local player
     if (localState.targetX !== undefined) {
         localState.x += (localState.targetX - localState.x) * lerpK;
         localState.z += (localState.targetZ - localState.z) * lerpK;
@@ -264,8 +238,7 @@ function render() {
     const cx = W / 2,        cy = H / 2;
     const range  = localState.range;
     
-    // Determine center and rotation based on options
-    const rot = opts.rotateCamera ? localState.rot : [1, 0, 0, 1]; // [rot.r00, rot.r02, rot.r20, rot.r22]
+    const rot = opts.rotateCamera ? localState.rot : [1, 0, 0, 1]; 
     const lx  = opts.followPlayer ? localState.x   : 0;
     const lz  = opts.followPlayer ? localState.z   : 0;
 
@@ -273,7 +246,6 @@ function render() {
     const radius = Math.min(W, H) * 0.5 - 2;
     const scale  = (radius / range) * zoom;
 
-    // ── Background ──
     ctx.clearRect(0, 0, W, H);
     ctx.save();
 
@@ -286,7 +258,6 @@ function render() {
     const opacity = theme.opacity;
     const accent  = `rgba(${theme.accent[0]}, ${theme.accent[1]}, ${theme.accent[2]}, ${opacity})`;
 
-    // Subtle radial gradient background
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
     grad.addColorStop(0, `rgba(12,12,16,${opacity * 0.95})`);
     grad.addColorStop(1, `rgba(5,5,7,${opacity * 0.98})`);
@@ -295,7 +266,6 @@ function render() {
     if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill(); }
     else { ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2); }
 
-    // ── Grid (5 lines each way like in-game) ──
     ctx.strokeStyle = `rgba(70,70,80,${0.31 * opacity})`;
     ctx.lineWidth = 1;
     if (isCirc) {
@@ -315,27 +285,21 @@ function render() {
         ctx.strokeRect(cx - radius*0.5, cy - radius*0.5, radius, radius);
     }
 
-    // ── Map Parts ──
     if (opts.showMap && mapParts.length > 0) {
         ctx.fillStyle   = `rgba(40,40,45,${0.47 * opacity})`;
         ctx.strokeStyle = `rgba(70,70,80,${0.31 * opacity})`;
         ctx.lineWidth   = 1.0;
 
         for (const part of mapParts) {
-            // part = [cx, cz, sx, sz, r00, r02, r20, r22]
             const [pcx, pcz, psx, psz, pr00, pr02, pr20, pr22] = part;
             const hx = psx * 0.5, hz = psz * 0.5;
 
-            // 4 corners in part-local space, transformed by part rotation then camera rotation
             const corners = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
             const pts = [];
             for (const [lx_, lz_] of corners) {
-                // Apply part rotation (XZ plane)
                 const wx = pcx + lx_ * pr00 + lz_ * pr02;
                 const wz = pcz + lx_ * pr20 + lz_ * pr22;
-                // Offset from local player
                 const dx = wx - lx, dz = wz - lz;
-                // Apply camera rotation
                 const {rx, rz} = worldToRadar(dx, dz, rot);
                 pts.push([cx + rx * scale, cy + rz * scale]);
             }
@@ -349,15 +313,12 @@ function render() {
         }
     }
 
-    // ── Crosshair ──
     ctx.strokeStyle = `rgba(70,70,80,${0.8 * opacity})`;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
 
-    // ── Players ──
     for (const [name, st] of Object.entries(playerStates)) {
-        // Interpolate position
         if (st.targetX !== undefined) {
             st.x  += (st.targetX - st.x)  * lerpK;
             st.z  += (st.targetZ - st.z)  * lerpK;
@@ -372,7 +333,6 @@ function render() {
         const {rx, rz} = worldToRadar(dx, dz, rot);
         let relX = rx / range, relY = rz / range;
 
-        // Clamp to edge like in-game
         if (isCirc) {
             const d = Math.sqrt(relX*relX + relY*relY);
             if (d > 0.96) { relX = (relX/d)*0.98; relY = (relY/d)*0.98; }
@@ -384,13 +344,11 @@ function render() {
         const px = cx + rx * scale;
         const py = cy + rz * scale;
 
-        // Rotate player facing through camera
         const {rx: rfx, rz: rfz} = worldToRadar(st.fx, st.fz, rot);
         const fLen = Math.sqrt(rfx*rfx + rfz*rfz);
         const dotColor = st.isEnemy ? `rgba(255,60,60,${opacity})` : `rgba(173,216,230,${opacity})`;
         const outColor = `rgba(0,0,0,${0.8 * opacity})`;
 
-        // Glow effect
         ctx.shadowBlur = 8;
         ctx.shadowColor = st.isEnemy ? 'rgba(255,60,60,0.5)' : 'rgba(173,216,230,0.5)';
 
@@ -409,10 +367,9 @@ function render() {
             ctx.fillStyle = dotColor; ctx.fill();
             ctx.strokeStyle = outColor; ctx.lineWidth = 1; ctx.stroke();
         }
-        ctx.shadowBlur = 0; // Reset for next draw
+        ctx.shadowBlur = 0; 
 
 
-        // Labels (name [hp] dist)
         let label = '';
         if (opts.showNames)    label += name;
         if (opts.showHealth && st.maxHealth) label += (label?' ':'') + '[' + Math.round(st.health) + ']';
@@ -431,7 +388,6 @@ function render() {
         }
     }
 
-    // ── Local Player Indicator (white triangle) ──
     if (opts.followPlayer || (Math.abs(localState.x-lx) < range*zoom && Math.abs(localState.z-lz) < range*zoom)) {
         const d_lx = localState.x - lx, d_lz = localState.z - lz;
         const {rx: lrx, rz: lrz} = worldToRadar(d_lx, d_lz, rot);
@@ -441,9 +397,6 @@ function render() {
         ctx.save();
         ctx.translate(lpx, lpy);
         
-        // If not following player, the triangle still needs to rotate based on player's camera if that's on
-        // but wait, if rotateCamera is ON, the whole world rotates, so the player arrow in the middle
-        // ALWAYS points up. If rotateCamera is OFF, the arrow should point where the camera points.
         if (!opts.rotateCamera) {
             const {rx: rfx, rz: rfz} = worldToRadar(-localState.rot[1], -localState.rot[3], [1,0,0,1]);
             const fAngle = Math.atan2(rfz, rfx) + Math.PI/2;
@@ -465,7 +418,6 @@ function render() {
         ctx.shadowBlur = 0;
         ctx.restore();
 
-        // Local player name
         if (opts.showNames && localState.name) {
             ctx.font = 'bold 10px Inter, sans-serif';
             ctx.textAlign = 'center';
@@ -476,14 +428,12 @@ function render() {
         }
     }
 
-    // ── Border ──
-    ctx.restore();  // Pop clip
+    ctx.restore(); 
     ctx.strokeStyle = accent;
     ctx.lineWidth = 1.5;
     if (isCirc) { ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke(); }
     else { ctx.strokeRect(cx - radius, cy - radius, radius*2, radius*2); }
 
-    // ── Connection lost ──
     if (lastPacketTime > 0 && Date.now() - lastPacketTime > 5000) {
         ctx.fillStyle = 'rgba(0,0,0,0.85)';
         ctx.fillRect(0, 0, W, H);
@@ -503,7 +453,6 @@ function render() {
     requestAnimationFrame(render);
 }
 
-// ── Zoom ────────────────────────────────────────────────────────────────────
 canvas.onwheel = (e) => {
     e.preventDefault();
     zoom *= e.deltaY < 0 ? 1.1 : 0.9;
